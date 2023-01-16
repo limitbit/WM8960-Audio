@@ -15,46 +15,26 @@ Check that the sound card name matches the source code wm8960-soundcard.
 ```bash
 pi@raspberrypi:~ $ aplay -l
 **** List of PLAYBACK Hardware Devices ****
-card 0: ALSA [bcm2835 ALSA], device 0: bcm2835 ALSA [bcm2835 ALSA]
-  Subdevices: 7/7
-  Subdevice #0: subdevice #0
-  Subdevice #1: subdevice #1
-  Subdevice #2: subdevice #2
-  Subdevice #3: subdevice #3
-  Subdevice #4: subdevice #4
-  Subdevice #5: subdevice #5
-  Subdevice #6: subdevice #6
-card 0: ALSA [bcm2835 ALSA], device 1: bcm2835 ALSA [bcm2835 IEC958/HDMI]
-  Subdevices: 1/1
-  Subdevice #0: subdevice #0
-card 1: wm8960soundcard [wm8960-soundcard], device 0: bcm2835-i2s-wm8960-hifi wm8960-hifi-0 []
-  Subdevices: 1/1
-  Subdevice #0: subdevice #0
-pi@raspberrypi:~ $ arecord -l
-**** List of CAPTURE Hardware Devices ****
-card 1: wm8960soundcard [wm8960-soundcard], device 0: bcm2835-i2s-wm8960-hifi wm8960-hifi-0 []
+card 0: wm8960soundcard [wm8960-soundcard], device 0: bcm2835-i2s-wm8960-hifi wm8960-hifi-0 [bcm2835-i2s-wm8960-hifi wm8960-hifi-0]
   Subdevices: 1/1
   Subdevice #0: subdevice #0
 
 ```
 If you want to change the alsa settings, You can use `sudo alsactl --file=/etc/wm8960-soundcard/wm8960_asound.state  store` to save it.
 
-
 ### Usage:
-```bash
-#It will capture sound an playback on hw:1
-arecord -f cd -Dhw:1 | aplay -Dhw:1
-```
 
-```bash
+#test speakers for both channels
+speaker-test -twav -c2 
+
 #capture sound 
-#arecord -d 10 -r 16000 -c 1 -t wav -f S16_LE test.wav
-arecord -D hw:1,0 -f S32_LE -r 16000 -c 2 test.wav
+#It will capture sound for both channels (L/R), duration 4 seconds, test.wav file name
+arecord -f S16_LE -d 4 -r 16000 -c 2 test.wav
 ```
 
 ```bash
 #play sound file test.wav
-aplay -D hw:1,0 test.wav
+aplay test.wav
 ```
 
 ### uninstall wm8960-soundcard
