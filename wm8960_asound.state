@@ -208,8 +208,8 @@ state.wm8960soundcard {
 	control.11 {
 		iface MIXER
 		name 'Headphone Playback Volume'
-		value.0 109
-		value.1 109
+		value.0 127
+		value.1 127
 		comment {
 			access 'read write'
 			type INTEGER
@@ -217,8 +217,8 @@ state.wm8960soundcard {
 			range '0 - 127'
 			dbmin -9999999
 			dbmax 600
-			dbvalue.0 -1200
-			dbvalue.1 -1200
+			dbvalue.0 600
+			dbvalue.1 600
 		}
 	}
 	control.12 {
@@ -235,8 +235,8 @@ state.wm8960soundcard {
 	control.13 {
 		iface MIXER
 		name 'Speaker Playback Volume'
-		value.0 109
-		value.1 109
+		value.0 127
+		value.1 127
 		comment {
 			access 'read write'
 			type INTEGER
@@ -244,8 +244,8 @@ state.wm8960soundcard {
 			range '0 - 127'
 			dbmin -9999999
 			dbmax 600
-			dbvalue.0 -1200
-			dbvalue.1 -1200
+			dbvalue.0 600
+			dbvalue.1 600
 		}
 	}
 	control.14 {
@@ -273,7 +273,7 @@ state.wm8960soundcard {
 	control.16 {
 		iface MIXER
 		name 'Speaker AC Volume'
-		value 4
+		value 5
 		comment {
 			access 'read write'
 			type INTEGER

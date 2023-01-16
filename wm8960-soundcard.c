@@ -666,8 +666,7 @@ static int asoc_simple_probe(struct platform_device *pdev)
 
 		ret = simple_parse_of(priv, li);
 		if (ret < 0) {
-			if (ret != -EPROBE_DEFER)
-				dev_err(dev, "parse error %d\n", ret);
+			dev_err_probe(dev, ret, "parse error\n");
 			goto err;
 		}
 
@@ -753,5 +752,5 @@ module_platform_driver(asoc_simple_card);
 
 MODULE_ALIAS("platform:asoc-simple-card");
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("ASoC wm8960 Sound Card");
+MODULE_DESCRIPTION("ASoC Simple Sound Card");
 MODULE_AUTHOR("Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>");

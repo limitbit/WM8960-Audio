@@ -405,7 +405,6 @@ SND_SOC_DAPM_PGA("OUT3 VMID", WM8960_POWER2, 1, 0, NULL, 0),
 };
 
 static const struct snd_soc_dapm_route audio_paths[] = {
-	{ "Left Boost Mixer", NULL , "MICB"},
 	{ "Left Boost Mixer", "LINPUT1 Switch", "LINPUT1" },
 	{ "Left Boost Mixer", "LINPUT2 Switch", "LINPUT2" },
 	{ "Left Boost Mixer", "LINPUT3 Switch", "LINPUT3" },
@@ -415,7 +414,6 @@ static const struct snd_soc_dapm_route audio_paths[] = {
 	{ "Left Input Mixer", NULL, "LINPUT2" },
 	{ "Left Input Mixer", NULL, "LINPUT3" },
 
-	{ "Right Boost Mixer", NULL , "MICB"},
 	{ "Right Boost Mixer", "RINPUT1 Switch", "RINPUT1" },
 	{ "Right Boost Mixer", "RINPUT2 Switch", "RINPUT2" },
 	{ "Right Boost Mixer", "RINPUT3 Switch", "RINPUT3" },
@@ -603,155 +601,161 @@ static const int bclk_divs[] = {
 	120, 160, 220, 240, 320, 320, 320
 };
 
-   
-																			
-									   
-									 
-									
-									 
-  
-															 
-															 
-														  
-  
-										  
-									
-												  
-										   
-											
-  
-		   
-												   
-																
-												   
-   
-	  
-																 
-													
- 
-						 
-			 
-						  
+/**
+ * wm8960_configure_sysclk - checks if there is a sysclk frequency available
+ *	The sysclk must be chosen such that:
+ *		- sysclk     = MCLK / sysclk_divs
+ *		- lrclk      = sysclk / dac_divs
+ *		- 10 * bclk  = sysclk / bclk_divs
+ *
+ *	If we cannot find an exact match for (sysclk, lrclk, bclk)
+ *	triplet, we relax the bclk such that bclk is chosen as the
+ *	closest available frequency greater than expected bclk.
+ *
+ * @wm8960: codec private data
+ * @mclk: MCLK used to derive sysclk
+ * @sysclk_idx: sysclk_divs index for found sysclk
+ * @dac_idx: dac_divs index for found lrclk
+ * @bclk_idx: bclk_divs index for found bclk
+ *
+ * Returns:
+ *  -1, in case no sysclk frequency available found
+ * >=0, in case we could derive bclk and lrclk from sysclk using
+ *      (@sysclk_idx, @dac_idx, @bclk_idx) dividers
+ */
+static
+int wm8960_configure_sysclk(struct wm8960_priv *wm8960, int mclk,
+			    int *sysclk_idx, int *dac_idx, int *bclk_idx)
+{
+	int sysclk, bclk, lrclk;
+	int i, j, k;
+	int diff, closest = mclk;
 
-						  
-				
+	/* marker for no match */
+	*bclk_idx = -1;
 
-					 
-					   
+	bclk = wm8960->bclk;
+	lrclk = wm8960->lrclk;
 
-												  
-												
-						   
-			
-								 
-											  
-									 
-			 
-												
-											 
-					
-					 
-				  
-				   
-		   
-	 
-									 
-					 
-				  
-				   
-					
-	 
-	
-								  
-		  
-   
-								
-		 
-  
-				  
- 
+	/* check if the sysclk frequency is available. */
+	for (i = 0; i < ARRAY_SIZE(sysclk_divs); ++i) {
+		if (sysclk_divs[i] == -1)
+			continue;
+		sysclk = mclk / sysclk_divs[i];
+		for (j = 0; j < ARRAY_SIZE(dac_divs); ++j) {
+			if (sysclk != dac_divs[j] * lrclk)
+				continue;
+			for (k = 0; k < ARRAY_SIZE(bclk_divs); ++k) {
+				diff = sysclk - bclk * bclk_divs[k] / 10;
+				if (diff == 0) {
+					*sysclk_idx = i;
+					*dac_idx = j;
+					*bclk_idx = k;
+					break;
+				}
+				if (diff > 0 && closest > diff) {
+					*sysclk_idx = i;
+					*dac_idx = j;
+					*bclk_idx = k;
+					closest = diff;
+				}
+			}
+			if (k != ARRAY_SIZE(bclk_divs))
+				break;
+		}
+		if (j != ARRAY_SIZE(dac_divs))
+			break;
+	}
+	return *bclk_idx;
+}
 
-   
-																		  
-												  
-									
-										
-									
-  
-															  
-															  
-														   
-  
-								  
-															
-												  
-										   
-											
-  
-		   
-														
-																	  
-												   
-   
-	  
-																		  
-												 
- 
-																	   
-								   
-								  
-			 
+/**
+ * wm8960_configure_pll - checks if there is a PLL out frequency available
+ *	The PLL out frequency must be chosen such that:
+ *		- sysclk      = lrclk * dac_divs
+ *		- freq_out    = sysclk * sysclk_divs
+ *		- 10 * sysclk = bclk * bclk_divs
+ *
+ * 	If we cannot find an exact match for (sysclk, lrclk, bclk)
+ * 	triplet, we relax the bclk such that bclk is chosen as the
+ * 	closest available frequency greater than expected bclk.
+ *
+ * @component: component structure
+ * @freq_in: input frequency used to derive freq out via PLL
+ * @sysclk_idx: sysclk_divs index for found sysclk
+ * @dac_idx: dac_divs index for found lrclk
+ * @bclk_idx: bclk_divs index for found bclk
+ *
+ * Returns:
+ * < 0, in case no PLL frequency out available was found
+ * >=0, in case we could derive bclk, lrclk, sysclk from PLL out using
+ *      (@sysclk_idx, @dac_idx, @bclk_idx) dividers
+ */
+static
+int wm8960_configure_pll(struct snd_soc_component *component, int freq_in,
+			 int *sysclk_idx, int *dac_idx, int *bclk_idx)
+{
+	struct wm8960_priv *wm8960 = snd_soc_component_get_drvdata(component);
+	int sysclk, bclk, lrclk, freq_out;
+	int diff, closest, best_freq_out;
+	int i, j, k;
 
-					 
-					   
-				   
+	bclk = wm8960->bclk;
+	lrclk = wm8960->lrclk;
+	closest = freq_in;
 
-						 
-										 
+	best_freq_out = -EINVAL;
+	*sysclk_idx = *dac_idx = *bclk_idx = -1;
 
-												
-						   
-			
-											  
-								
-									  
+	/*
+	 * From Datasheet, the PLL performs best when f2 is between
+	 * 90MHz and 100MHz, the desired sysclk output is 11.2896MHz
+	 * or 12.288MHz, then sysclkdiv = 2 is the best choice.
+	 * So search sysclk_divs from 2 to 1 other than from 1 to 2.
+	 */
+	for (i = ARRAY_SIZE(sysclk_divs) - 1; i >= 0; --i) {
+		if (sysclk_divs[i] == -1)
+			continue;
+		for (j = 0; j < ARRAY_SIZE(dac_divs); ++j) {
+			sysclk = lrclk * dac_divs[j];
+			freq_out = sysclk * sysclk_divs[i];
 
-												
-												  
-			  
+			for (k = 0; k < ARRAY_SIZE(bclk_divs); ++k) {
+				if (!is_pll_freq_available(freq_in, freq_out))
+					continue;
 
-											 
-					
-					 
-				  
-				   
-					 
-	 
-									 
-					 
-				  
-				   
-					
-							  
-	 
-	
-   
-  
+				diff = sysclk - bclk * bclk_divs[k] / 10;
+				if (diff == 0) {
+					*sysclk_idx = i;
+					*dac_idx = j;
+					*bclk_idx = k;
+					return freq_out;
+				}
+				if (diff > 0 && closest > diff) {
+					*sysclk_idx = i;
+					*dac_idx = j;
+					*bclk_idx = k;
+					closest = diff;
+					best_freq_out = freq_out;
+				}
+			}
+		}
+	}
 
-					  
- 
+	return best_freq_out;
+}
 static int wm8960_configure_clocking(struct snd_soc_component *component)
 {
 	struct wm8960_priv *wm8960 = snd_soc_component_get_drvdata(component);
-	int sysclk, bclk, lrclk, freq_out, freq_in;
+	int freq_out, freq_in;
 	u16 iface1 = snd_soc_component_read(component, WM8960_IFACE1);
 	int i, j, k;
-		 
+	int ret;
 
 	if (!(iface1 & (1<<6))) {
 		dev_dbg(component->dev,
 			"Codec is slave mode, no need to configure clock\n");
-		//return 0;
+		return 0;
 	}
 
 	if (wm8960->clk_id != WM8960_SYSCLK_MCLK && !wm8960->freq_in) {
@@ -760,11 +764,6 @@ static int wm8960_configure_clocking(struct snd_soc_component *component)
 	}
 
 	freq_in = wm8960->freq_in;
-	bclk = wm8960->bclk;
-	lrclk = wm8960->lrclk;
-
-	//printk("clk_id %d freq_in: %d bclk: %d  lrclk: %d\n",wm8960->clk_id ,freq_in, bclk,lrclk);
-
 	/*
 	 * If it's sysclk auto mode, check if the MCLK can provide sysclk or
 	 * not. If MCLK can provide sysclk, using MCLK to provide sysclk
@@ -783,61 +782,21 @@ static int wm8960_configure_clocking(struct snd_soc_component *component)
 	}
 
 	if (wm8960->clk_id != WM8960_SYSCLK_PLL) {
-		/* check if the sysclk frequency is available. */
-		for (i = 0; i < ARRAY_SIZE(sysclk_divs); ++i) {
-			if (sysclk_divs[i] == -1)
-				continue;
-			sysclk = freq_out / sysclk_divs[i];
-			for (j = 0; j < ARRAY_SIZE(dac_divs); ++j) {
-				if (sysclk != dac_divs[j] * lrclk)
-					continue;
-				for (k = 0; k < ARRAY_SIZE(bclk_divs); ++k)
-					if (sysclk == bclk * bclk_divs[k] / 10)
-						break;
-				if (k != ARRAY_SIZE(bclk_divs))
-					break;
-			}
-			if (j != ARRAY_SIZE(dac_divs))
-				break;
-		}
-
-		if (i != ARRAY_SIZE(sysclk_divs)) {
+		ret = wm8960_configure_sysclk(wm8960, freq_out, &i, &j, &k);
+		if (ret >= 0) {
 			goto configure_clock;
 		} else if (wm8960->clk_id != WM8960_SYSCLK_AUTO) {
 			dev_err(component->dev, "failed to configure clock\n");
 			return -EINVAL;
 		}
 	}
-	/* get a available pll out frequency and set pll */
-	for (i = 0; i < ARRAY_SIZE(sysclk_divs); ++i) {
-		if (sysclk_divs[i] == -1)
-			continue;
-		for (j = 0; j < ARRAY_SIZE(dac_divs); ++j) {
-			sysclk = lrclk * dac_divs[j];
-			freq_out = sysclk * sysclk_divs[i];
 
-			for (k = 0; k < ARRAY_SIZE(bclk_divs); ++k) {
-				if (sysclk == bclk * bclk_divs[k] / 10 &&
-				    is_pll_freq_available(freq_in, freq_out)) {
-					wm8960_set_pll(component,
-						       freq_in, freq_out);
-					break;
-				} else {
-					continue;
-				}
-			}
-			if (k != ARRAY_SIZE(bclk_divs))
-				break;
-		}
-		if (j != ARRAY_SIZE(dac_divs))
-			break;
+	freq_out = wm8960_configure_pll(component, freq_in, &i, &j, &k);
+	if (freq_out < 0) {
+		dev_err(component->dev, "failed to configure clock via PLL\n");
+		return freq_out;
 	}
-
-	if (i == ARRAY_SIZE(sysclk_divs)) {
-		dev_err(component->dev, "failed to configure clock\n");
-		return -EINVAL;
-	}
-											  
+	wm8960_set_pll(component, freq_in, freq_out);
 
 configure_clock:
 	/* configure sysclk clock */
@@ -883,7 +842,7 @@ static int wm8960_hw_params(struct snd_pcm_substream *substream,
 			iface |= 0x000c;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	default:
 		dev_err(component->dev, "unsupported width %d\n",
 			params_width(params));
@@ -1331,7 +1290,6 @@ static int wm8960_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
 {
 	struct snd_soc_component *component = dai->component;
 	struct wm8960_priv *wm8960 = snd_soc_component_get_drvdata(component);
-	clk_id = WM8960_SYSCLK_PLL;
 
 	switch (clk_id) {
 	case WM8960_SYSCLK_MCLK:
@@ -1348,7 +1306,6 @@ static int wm8960_set_dai_sysclk(struct snd_soc_dai *dai, int clk_id,
 		return -EINVAL;
 	}
 
-	wm8960->freq_in = 24000000;
 	wm8960->sysclk = freq;
 	wm8960->clk_id = clk_id;
 
@@ -1439,6 +1396,12 @@ static void wm8960_set_pdata_from_of(struct i2c_client *i2c,
 
 	if (of_property_read_bool(np, "wlf,shared-lrclk"))
 		pdata->shared_lrclk = true;
+
+	of_property_read_u32_array(np, "wlf,gpio-cfg", pdata->gpio_cfg,
+				   ARRAY_SIZE(pdata->gpio_cfg));
+
+	of_property_read_u32_array(np, "wlf,hp-cfg", pdata->hp_cfg,
+				   ARRAY_SIZE(pdata->hp_cfg));
 }
 
 static int wm8960_i2c_probe(struct i2c_client *i2c,
@@ -1453,7 +1416,6 @@ static int wm8960_i2c_probe(struct i2c_client *i2c,
 	if (wm8960 == NULL)
 		return -ENOMEM;
 
-	wm8960->clk_id = WM8960_SYSCLK_PLL;
 	wm8960->mclk = devm_clk_get(&i2c->dev, "mclk");
 	if (IS_ERR(wm8960->mclk)) {
 		if (PTR_ERR(wm8960->mclk) == -EPROBE_DEFER)
@@ -1497,6 +1459,20 @@ static int wm8960_i2c_probe(struct i2c_client *i2c,
 	regmap_update_bits(wm8960->regmap, WM8960_LOUT2, 0x100, 0x100);
 	regmap_update_bits(wm8960->regmap, WM8960_ROUT2, 0x100, 0x100);
 
+	/* ADCLRC pin configured as GPIO. */
+	regmap_update_bits(wm8960->regmap, WM8960_IFACE2, 1 << 6,
+			   wm8960->pdata.gpio_cfg[0] << 6);
+	regmap_update_bits(wm8960->regmap, WM8960_ADDCTL4, 0xF << 4,
+			   wm8960->pdata.gpio_cfg[1] << 4);
+
+	/* Enable headphone jack detect */
+	regmap_update_bits(wm8960->regmap, WM8960_ADDCTL4, 3 << 2,
+			   wm8960->pdata.hp_cfg[0] << 2);
+	regmap_update_bits(wm8960->regmap, WM8960_ADDCTL2, 3 << 5,
+			   wm8960->pdata.hp_cfg[1] << 5);
+	regmap_update_bits(wm8960->regmap, WM8960_ADDCTL1, 3,
+			   wm8960->pdata.hp_cfg[2]);
+
 	i2c_set_clientdata(i2c, wm8960);
 
 	ret = devm_snd_soc_register_component(&i2c->dev,
@@ -1507,7 +1483,6 @@ static int wm8960_i2c_probe(struct i2c_client *i2c,
 
 static int wm8960_i2c_remove(struct i2c_client *client)
 {
-	snd_soc_unregister_component(&client->dev);
 	return 0;
 }
 
