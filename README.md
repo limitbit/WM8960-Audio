@@ -1,10 +1,4 @@
-# WM8960 Audio HAT
-
-The drivers of [WM8960 Audio HAT] for Raspberry Pi.
-
-http://www.waveshare.net/shop/WM8960-Audio-HAT.htm
-
-http://www.waveshare.com/wm8960-audio-hat.htm
+# WM8960 Audio Driver for CM4
 
 ### Install wm8960-soundcard
 Get the wm8960 soundcard source code. and install all linux kernel drivers
@@ -15,8 +9,6 @@ cd WM8960-Audio-HAT
 sudo ./install.sh 
 sudo reboot
 ```
-
-While the upstream wm8960 codec is not currently supported by current Pi kernel builds, upstream wm8960 has some bugs, we had fixed it. we must it build manually.
 
 Check that the sound card name matches the source code wm8960-soundcard.
 
@@ -78,4 +70,3 @@ Thank you!
 ------------------------------------------------------
 ```
 
-Enjoy !
